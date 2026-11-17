@@ -2,197 +2,243 @@ import os
 import pickle
 
 import pandas as pd
-from flask import Flask, jsonify, render_template_string, request
+from flask import Flask, render_template_string, request
 
 app = Flask(__name__)
 
+# ---------------------------------------------------------------------------
+# Load model (Linear.pkl must sit in the same folder as app.py)
+# ---------------------------------------------------------------------------
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODEL_PATH = os.path.join(BASE_DIR, "Linear.pkl")
 
 with open(MODEL_PATH, "rb") as f:
     model = pickle.load(f)
 
-FEATURES = list(model.feature_names_in_)
+CURRENCY = "$"  # change to "₹" if your training data was in rupees
+
+# Form fields: name, label, hint, input attributes, default value
+FIELDS = [
+    {"name": "Square_Footage", "label": "Square footage", "hint": "Built-up area in sq ft",
+     "min": 300, "max": 10000, "step": 1, "default": 2000},
+    {"name": "Num_Bedrooms", "label": "Bedrooms", "hint": "Number of bedrooms",
+     "min": 1, "max": 10, "step": 1, "default": 3},
+    {"name": "Num_Bathrooms", "label": "Bathrooms", "hint": "Number of bathrooms",
+     "min": 1, "max": 10, "step": 1, "default": 2},
+    {"name": "Year_Built", "label": "Year built", "hint": "Construction year",
+     "min": 1900, "max": 2030, "step": 1, "default": 2005},
+    {"name": "Lot_Size", "label": "Lot size", "hint": "Plot size in acres",
+     "min": 0, "max": 20, "step": 0.01, "default": 2.5},
+    {"name": "Garage_Size", "label": "Garage size", "hint": "Cars that fit in the garage",
+     "min": 0, "max": 6, "step": 1, "default": 1},
+    {"name": "Neighborhood_Quality", "label": "Neighborhood quality", "hint": "Rating from 1 (low) to 10 (high)",
+     "min": 1, "max": 10, "step": 1, "default": 6},
+]
 
 PAGE = """
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>HomeWorth AI · House Price Predictor</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-<style>
-  :root{
-    --c1:#6a11cb; --c2:#2575fc; --c3:#00c9a7; --c4:#ff6a88;
-    --ink:#1f2340; --muted:#6b7090; --card:rgba(255,255,255,.92);
-  }
-  *{box-sizing:border-box;margin:0;padding:0}
-  body{
-    font-family:'Poppins',sans-serif; color:var(--ink); min-height:100vh;
-    background:linear-gradient(-45deg,#1b1464,#6a11cb,#2575fc,#00c9a7);
-    background-size:400% 400%; animation:flow 18s ease infinite;
-    padding:32px 16px 48px;
-  }
-  @keyframes flow{0%{background-position:0% 50%}50%{background-position:100% 50%}100%{background-position:0% 50%}}
-  .wrap{max-width:1050px;margin:0 auto}
-  header{text-align:center;color:#fff;margin-bottom:28px}
-  header .logo{font-size:44px}
-  header h1{font-size:2.3rem;font-weight:700;letter-spacing:.5px}
-  header p{opacity:.85;font-weight:300;margin-top:6px}
-  .grid{display:grid;grid-template-columns:1.5fr 1fr;gap:24px}
-  @media(max-width:860px){.grid{grid-template-columns:1fr}}
-  .card{
-    background:var(--card);border-radius:22px;padding:28px;
-    box-shadow:0 20px 50px rgba(15,10,60,.35);backdrop-filter:blur(8px);
-  }
-  .card h2{font-size:1.15rem;margin-bottom:18px;display:flex;align-items:center;gap:8px}
-  .card h2::before{content:"";width:6px;height:22px;border-radius:4px;
-    background:linear-gradient(var(--c1),var(--c2))}
-  .fields{display:grid;grid-template-columns:1fr 1fr;gap:16px}
-  @media(max-width:560px){.fields{grid-template-columns:1fr}}
-  label{display:block;font-size:.8rem;font-weight:500;color:var(--muted);margin-bottom:6px}
-  input{
-    width:100%;padding:12px 14px;border-radius:12px;border:2px solid #e3e6f5;
-    font:inherit;font-size:.95rem;color:var(--ink);background:#fff;transition:.2s;
-  }
-  input:focus{outline:none;border-color:var(--c2);box-shadow:0 0 0 4px rgba(37,117,252,.15)}
-  .full{grid-column:1/-1}
-  button{
-    width:100%;margin-top:22px;padding:15px;border:0;border-radius:14px;cursor:pointer;
-    font:inherit;font-weight:600;font-size:1.05rem;color:#fff;letter-spacing:.4px;
-    background:linear-gradient(90deg,var(--c1),var(--c2),var(--c3));background-size:200% 100%;
-    transition:.4s;box-shadow:0 10px 24px rgba(37,117,252,.4);
-  }
-  button:hover{background-position:100% 0;transform:translateY(-2px)}
-  .result{
-    display:flex;flex-direction:column;justify-content:center;align-items:center;
-    text-align:center;min-height:100%;
-  }
-  .result .label{color:var(--muted);font-size:.85rem;text-transform:uppercase;letter-spacing:2px}
-  .price{
-    font-size:2.8rem;font-weight:700;margin:10px 0;
-    background:linear-gradient(90deg,var(--c1),var(--c2),var(--c3));
-    -webkit-background-clip:text;background-clip:text;color:transparent;
-    word-break:break-word;
-  }
-  .badge{
-    display:inline-block;padding:6px 16px;border-radius:30px;font-size:.8rem;color:#fff;
-    background:linear-gradient(90deg,var(--c4),#ff9a5a);
-  }
-  .placeholder{font-size:3.4rem;opacity:.5}
-  .error{color:#d6336c;font-weight:500}
-  footer{text-align:center;color:#fff;opacity:.7;font-size:.8rem;margin-top:26px}
-</style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>House Price Predictor</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --ink: #1b1340;
+      --muted: #6b6490;
+      --line: #e6e1f7;
+      --violet: #6a3df0;
+      --magenta: #d946ef;
+      --coral: #ff6b81;
+      --amber: #ffb347;
+      --teal: #22d3c5;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: "Plus Jakarta Sans", system-ui, sans-serif;
+      color: var(--ink);
+      min-height: 100vh;
+      padding: 40px 20px;
+      background:
+        radial-gradient(900px 500px at 10% -10%, rgba(34, 211, 197, .55), transparent 60%),
+        radial-gradient(800px 500px at 100% 0%, rgba(255, 179, 71, .55), transparent 60%),
+        linear-gradient(135deg, #3b1fa8 0%, #6a3df0 35%, #d946ef 70%, #ff6b81 100%);
+      background-attachment: fixed;
+    }
+    .wrap { max-width: 1080px; margin: 0 auto; }
+    header { color: #fff; margin-bottom: 28px; }
+    header h1 { font-size: clamp(1.9rem, 4vw, 2.8rem); font-weight: 800; letter-spacing: -.02em; }
+    header p { margin-top: 8px; font-size: 1.05rem; color: rgba(255,255,255,.85); max-width: 52ch; }
+
+    .grid { display: grid; grid-template-columns: 1.35fr 1fr; gap: 24px; align-items: start; }
+    @media (max-width: 860px) { .grid { grid-template-columns: 1fr; } }
+
+    .panel {
+      background: rgba(255,255,255,.94);
+      border-radius: 24px;
+      padding: 30px;
+      box-shadow: 0 24px 60px rgba(30, 10, 90, .35);
+    }
+    .panel h2 { font-size: 1.15rem; font-weight: 700; margin-bottom: 20px; }
+
+    .fields { display: grid; grid-template-columns: 1fr 1fr; gap: 18px 16px; }
+    @media (max-width: 560px) { .fields { grid-template-columns: 1fr; } }
+    .field.wide { grid-column: 1 / -1; }
+    label { display: block; font-size: .92rem; font-weight: 600; margin-bottom: 6px; }
+    input[type=number] {
+      width: 100%;
+      padding: 12px 14px;
+      font: inherit;
+      color: var(--ink);
+      background: #faf9ff;
+      border: 1.5px solid var(--line);
+      border-radius: 12px;
+      transition: border-color .15s, box-shadow .15s;
+    }
+    input[type=number]:focus {
+      outline: none;
+      border-color: var(--violet);
+      box-shadow: 0 0 0 4px rgba(106, 61, 240, .18);
+    }
+    .hint { font-size: .78rem; color: var(--muted); margin-top: 5px; }
+
+    button {
+      margin-top: 26px;
+      width: 100%;
+      padding: 15px 20px;
+      font: inherit;
+      font-weight: 700;
+      font-size: 1.02rem;
+      color: #fff;
+      border: 0;
+      border-radius: 14px;
+      cursor: pointer;
+      background: linear-gradient(90deg, var(--violet), var(--magenta) 55%, var(--coral));
+      box-shadow: 0 10px 24px rgba(217, 70, 239, .4);
+      transition: transform .12s, box-shadow .12s;
+    }
+    button:hover { transform: translateY(-2px); box-shadow: 0 14px 30px rgba(217, 70, 239, .5); }
+    button:focus-visible { outline: 3px solid var(--amber); outline-offset: 3px; }
+
+    .result {
+      position: sticky; top: 24px;
+      color: #fff;
+      border-radius: 24px;
+      padding: 30px;
+      background: linear-gradient(160deg, #1b1340 0%, #3b1fa8 55%, #6a3df0 100%);
+      box-shadow: 0 24px 60px rgba(30, 10, 90, .4);
+      overflow: hidden;
+    }
+    .result::after {
+      content: "";
+      position: absolute; right: -70px; bottom: -70px;
+      width: 220px; height: 220px; border-radius: 50%;
+      background: radial-gradient(circle, rgba(34,211,197,.55), transparent 70%);
+    }
+    .result small { display: block; color: rgba(255,255,255,.7); font-size: .95rem; }
+    .price {
+      margin-top: 10px;
+      font-size: clamp(2.2rem, 5vw, 3.2rem);
+      font-weight: 800;
+      letter-spacing: -.02em;
+      background: linear-gradient(90deg, var(--teal), #fff 50%, var(--amber));
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+      word-break: break-word;
+    }
+    .result p { margin-top: 14px; font-size: .9rem; color: rgba(255,255,255,.75); line-height: 1.55; position: relative; z-index: 1; }
+    .error { margin-top: 12px; padding: 12px 14px; border-radius: 12px; background: rgba(255,107,129,.18); color: #ffd7dd; font-size: .92rem; }
+    .empty { color: rgba(255,255,255,.8); line-height: 1.6; position: relative; z-index: 1; }
+
+    footer { text-align: center; color: rgba(255,255,255,.75); font-size: .85rem; margin-top: 26px; }
+  </style>
 </head>
 <body>
-<div class="wrap">
-  <header>
-    <div class="logo">🏡</div>
-    <h1>HomeWorth AI</h1>
-    <p>Estimate a property's market value with a Linear Regression model</p>
-  </header>
+  <div class="wrap">
+    <header>
+      <h1>House Price Predictor</h1>
+      <p>Enter the property details and get an estimated sale price from a linear regression model.</p>
+    </header>
 
-  <div class="grid">
-    <div class="card">
-      <h2>Property Details</h2>
-      <form method="post" action="/">
+    <div class="grid">
+      <form class="panel" method="POST" action="/">
+        <h2>Property details</h2>
         <div class="fields">
-          <div>
-            <label>Square Footage (sq ft)</label>
-            <input type="number" step="any" name="Square_Footage" required
-                   value="{{ v.get('Square_Footage', 2000) }}">
+          {% for f in fields %}
+          <div class="field {% if loop.last and fields|length is odd %}wide{% endif %}">
+            <label for="{{ f.name }}">{{ f.label }}</label>
+            <input type="number" id="{{ f.name }}" name="{{ f.name }}"
+                   min="{{ f.min }}" max="{{ f.max }}" step="{{ f.step }}"
+                   value="{{ values[f.name] }}" required>
+            <div class="hint">{{ f.hint }}</div>
           </div>
-          <div>
-            <label>Year Built</label>
-            <input type="number" name="Year_Built" required min="1800" max="2100"
-                   value="{{ v.get('Year_Built', 2005) }}">
-          </div>
-          <div>
-            <label>Bedrooms</label>
-            <input type="number" name="Num_Bedrooms" required min="0"
-                   value="{{ v.get('Num_Bedrooms', 3) }}">
-          </div>
-          <div>
-            <label>Bathrooms</label>
-            <input type="number" name="Num_Bathrooms" required min="0"
-                   value="{{ v.get('Num_Bathrooms', 2) }}">
-          </div>
-          <div>
-            <label>Lot Size</label>
-            <input type="number" step="any" name="Lot_Size" required min="0"
-                   value="{{ v.get('Lot_Size', 1.5) }}">
-          </div>
-          <div>
-            <label>Garage Size (cars)</label>
-            <input type="number" name="Garage_Size" required min="0"
-                   value="{{ v.get('Garage_Size', 2) }}">
-          </div>
-          <div class="full">
-            <label>Neighborhood Quality</label>
-            <input type="number" step="any" name="Neighborhood_Quality" required
-                   value="{{ v.get('Neighborhood_Quality', 7) }}">
-          </div>
+          {% endfor %}
         </div>
-        <button type="submit">✨ Predict Price</button>
+        <button type="submit">Predict price</button>
       </form>
+
+      <aside class="result" aria-live="polite">
+        {% if error %}
+          <small>Estimated price</small>
+          <div class="error">{{ error }}</div>
+        {% elif prediction is not none %}
+          <small>Estimated price</small>
+          <div class="price">{{ prediction }}</div>
+          <p>This is an estimate from the model based on the seven values you entered. Change any value and predict again to compare.</p>
+        {% else %}
+          <div class="empty">Fill in the property details and press <b>Predict price</b>. Your estimate will appear here.</div>
+        {% endif %}
+      </aside>
     </div>
 
-    <div class="card result">
-      {% if error %}
-        <div class="placeholder">⚠️</div>
-        <p class="error">{{ error }}</p>
-      {% elif prediction is not none %}
-        <span class="label">Estimated Price</span>
-        <div class="price">${{ "{:,.0f}".format(prediction) }}</div>
-        <span class="badge">Linear Regression Estimate</span>
-      {% else %}
-        <div class="placeholder">📊</div>
-        <p style="color:var(--muted);margin-top:10px">
-          Fill in the property details and press <b>Predict Price</b> to see the estimate.
-        </p>
-      {% endif %}
-    </div>
+    <footer>Built with Flask and scikit-learn</footer>
   </div>
-
-  <footer>Built with Flask &amp; scikit-learn · Deployed on Render</footer>
-</div>
 </body>
 </html>
 """
 
 
-def predict_price(values: dict) -> float:
-    row = pd.DataFrame([[float(values[f]) for f in FEATURES]], columns=FEATURES)
-    return float(model.predict(row)[0])
+def default_values():
+    return {f["name"]: f["default"] for f in FIELDS}
 
 
 @app.route("/", methods=["GET", "POST"])
 def home():
-    prediction, error, values = None, None, {}
+    values = default_values()
+    prediction = None
+    error = None
+
     if request.method == "POST":
-        values = request.form.to_dict()
         try:
-            prediction = predict_price(values)
-        except (KeyError, ValueError):
-            error = "Please enter valid numbers in every field."
-    return render_template_string(PAGE, prediction=prediction, error=error, v=values)
+            row = {}
+            for f in FIELDS:
+                raw = request.form.get(f["name"], "").strip()
+                values[f["name"]] = raw
+                row[f["name"]] = float(raw)
 
+            # Column order must match the order the model was trained on
+            df = pd.DataFrame([row])[list(model.feature_names_in_)]
+            result = float(model.predict(df)[0])
+            prediction = f"{CURRENCY}{result:,.0f}"
+        except ValueError:
+            error = "Please enter a valid number in every field."
+        except Exception as exc:  # keep the page alive on any model error
+            error = f"Could not predict: {exc}"
 
-@app.route("/api/predict", methods=["POST"])
-def api_predict():
-    data = request.get_json(silent=True) or {}
-    try:
-        return jsonify({"predicted_price": round(predict_price(data), 2)})
-    except (KeyError, ValueError, TypeError):
-        return jsonify({"error": "Required numeric fields: " + ", ".join(FEATURES)}), 400
+    return render_template_string(
+        PAGE, fields=FIELDS, values=values, prediction=prediction, error=error
+    )
 
 
 @app.route("/health")
 def health():
-    return jsonify(status="ok")
+    return {"status": "ok"}
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=False)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port, debug=False)
